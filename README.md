@@ -58,7 +58,7 @@ The **File Inventory Application** is a Python-based tool designed to scan direc
 1. Run the application:
 
    ```bash
-   python extract_metadata.py
+   python main.py
    ```
 
 2. Follow the interactive menus to:
