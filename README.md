@@ -44,26 +44,7 @@ The **File Inventory Application** is a Python-based tool designed to scan direc
    - Customize the UI theme by editing the `colors.json` file.
 3. Exit the application by selecting the `x` option in any menu.
 
-## Version Control Setup
-To set up version control for this project:
-1. Initialize a Git repository in the project folder:
-   ```bash
-   git init
-   ```
-2. Add all files to the repository:
-   ```bash
-   git add .
-   ```
-3. Commit the initial version:
-   ```bash
-   git commit -m "Initial commit - version 0.1"
-   ```
-4. (Optional) Connect to a remote repository (e.g., GitHub):
-   ```bash
-   git remote add origin <repository_url>
-   git branch -M main
-   git push -u origin main
-   ```
+
 
 ## Assumptions
 - The application dynamically determines the default source folder based on the current user's home directory. For example, it defaults to `~/OneDrive/Documents` on systems where OneDrive is configured.
