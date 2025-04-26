@@ -7,7 +7,7 @@
 
 ## Version
 
-This is version 0.1 of the File Inventory Application.
+This is version 0.2 of the File Inventory Application.
 
 ## Overview
 
