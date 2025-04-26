@@ -4,6 +4,7 @@ from pathlib import Path
 import datetime
 from tqdm import tqdm  # For progress bar
 from colorama import Fore, Back, Style
+import socket
 
 # Add a function to load colors from a JSON configuration file
 def load_colors(config_file="colors.json"):
@@ -47,8 +48,8 @@ def human_readable_size(size_bytes):
     s = round(size_bytes / p, 2)
     return f"{s} {size_units[i]}"
 
-def extract_metadata(file_path):
-    """Extracts basic metadata for a given file."""
+def extract_metadata(file_path, hostname):
+    """Extracts basic metadata for a given file, including hostname."""
     try:
         file_name = os.path.basename(file_path)
         file_extension = os.path.splitext(file_name)[1]  # Get only the extension
@@ -61,7 +62,8 @@ def extract_metadata(file_path):
             "file_size_bytes": file_size_bytes,
             "last_modified_timestamp": modified_timestamp,
             "last_modified_iso": modified_date,
-            "full_path": file_path
+            "full_path": file_path,
+            "hostname": hostname
         }
     except Exception as e:
         print(f"Error extracting metadata for {file_path}: {e}")
@@ -87,17 +89,38 @@ def identify_potential_groups(metadata, source_folder):
             elif len(path_parts) > 1 and any(keyword in path_parts[-2].lower() for keyword in ["bundle", "package"]):
                 item["potential_application_group"] = "potential_bundle"
 
-def traverse_and_extract(root_dir):
-    """Traverses the directory and extracts metadata for each file."""
+def update_last_scan():
+    """Updates the last scan timestamp in a JSON file."""
+    scan_file = "last_scan.json"
+    try:
+        with open(scan_file, "w") as f:
+            json.dump({"last_scan": datetime.datetime.now().isoformat()}, f, indent=4)
+    except Exception as e:
+        print(text_fg + f"Error updating last scan timestamp: {e}" + Style.RESET_ALL)
+
+# Modify traverse_and_extract to handle errors silently and log them to a JSON file
+def traverse_and_extract(root_dir, hostname):
+    """Traverses the directory and extracts metadata for each file, including hostname."""
     inventory = []
     total_size = 0
+    error_log = []
     all_files = [os.path.join(dp, f) for dp, dn, filenames in os.walk(root_dir) for f in filenames]
 
     for file_path in tqdm(all_files, desc="Processing files", unit="file"):
-        metadata = extract_metadata(file_path)
-        if metadata:
-            inventory.append(metadata)
-            total_size += metadata["file_size_bytes"]
+        try:
+            metadata = extract_metadata(file_path, hostname)
+            if metadata:
+                inventory.append(metadata)
+                total_size += metadata["file_size_bytes"]
+        except Exception as e:
+            error_log.append({"file_path": file_path, "error": str(e)})
+
+    # Save errors to a JSON file
+    if error_log:
+        error_log_file = "error_log.json"
+        with open(error_log_file, "w") as f:
+            json.dump(error_log, f, indent=4)
+        print(text_fg + f"✔ Encountered {len(error_log)} errors. Details saved to: {error_log_file}" + Style.RESET_ALL)
 
     return inventory, total_size
 
@@ -217,6 +240,7 @@ def print_footer_with_scan():
     print(text_fg + "Hope you like my work!".center(50) + Style.RESET_ALL)
     print(header_bg + header_fg + "=" * 50 + Style.RESET_ALL)
 
+# Update display_summary_statistics to include recent hosts and dynamic details
 def display_summary_statistics(inventory):
     """Displays summary statistics of the file inventory."""
     if not inventory:
@@ -226,18 +250,37 @@ def display_summary_statistics(inventory):
     total_files = len(inventory)
     total_size = sum(item["file_size_bytes"] for item in inventory)
     extensions = {}
+    hostnames = {}
+
     for item in inventory:
         ext = item["file_extension"].lower()
         extensions[ext] = extensions.get(ext, 0) + 1
 
-    lines = [
-        highlight_fg + f"Total files: {total_files}" + Style.RESET_ALL,
-        highlight_fg + f"Total size: {human_readable_size(total_size)}" + Style.RESET_ALL,
-        header_fg + "File count by extension:" + Style.RESET_ALL
-    ]
-    lines.extend([text_fg + f"  {ext}: {count}" + Style.RESET_ALL for ext, count in sorted(extensions.items())])
+        hostname = item.get("hostname", "Unknown Host")
+        hostnames[hostname] = hostnames.get(hostname, 0) + 1
 
-    paginate_output(lines)
+    # Sort extensions and hostnames by count, descending
+    sorted_extensions = sorted(extensions.items(), key=lambda x: x[1], reverse=True)
+    sorted_hostnames = sorted(hostnames.items(), key=lambda x: x[1], reverse=True)
+
+    # Display header
+    print(header_fg + "Summary Statistics".center(50, "=") + Style.RESET_ALL)
+
+    # Display total files and size
+    print(highlight_fg + f"Total Files: {total_files}".ljust(30) + f"Total Size: {human_readable_size(total_size)}" + Style.RESET_ALL)
+
+    # Display top 5 extensions
+    print(header_fg + "Top File Extensions:" + Style.RESET_ALL)
+    for ext, count in sorted_extensions[:5]:
+        print(text_fg + f"  {ext}: {count} file(s)" + Style.RESET_ALL)
+
+    # Display recent hostnames
+    print(header_fg + "Recent Hosts Scanned:" + Style.RESET_ALL)
+    for hostname, count in sorted_hostnames[:5]:
+        print(text_fg + f"  {hostname}: {count} file(s)" + Style.RESET_ALL)
+
+    # Footer
+    print(header_fg + "=" * 50 + Style.RESET_ALL)
 
 def search_files_by_name(inventory, search_term):
     """Searches for files by name or partial name."""
@@ -280,213 +323,368 @@ def group_files_by_directory(inventory):
     lines.extend([text_fg + f"  {directory}: {stats['count']} file(s), {human_readable_size(stats['size'])}" + Style.RESET_ALL for directory, stats in directory_groups.items()])
     paginate_output(lines)
 
-def display_inventory_menu(inventory):
-    """Interactive menu to display inventory data."""
-    while True:
-        # Reload inventory at the start of the menu
-        inventory[:] = load_existing_inventory(output_file)
+def group_files_by_hostname_and_drive(inventory):
+    """Groups files by hostname and drive."""
+    grouped_data = {}
 
-        print_header("Inventory Display Menu", inventory)
+    for item in inventory:
+        # Extract hostname and drive from the file path
+        full_path = item.get("full_path", "")
+        if os.name == 'nt':
+            drive, _ = os.path.splitdrive(full_path)
+        else:
+            drive = "/"  # For non-Windows systems, use root as the drive
+
+        hostname = os.uname().nodename if hasattr(os, 'uname') else "Unknown Host"
+
+        # Initialize nested dictionary structure
+        if hostname not in grouped_data:
+            grouped_data[hostname] = {}
+        if drive not in grouped_data[hostname]:
+            grouped_data[hostname][drive] = {"count": 0, "size": 0}
+
+        # Update counts and sizes
+        grouped_data[hostname][drive]["count"] += 1
+        grouped_data[hostname][drive]["size"] += item.get("file_size_bytes", 0)
+
+    return grouped_data
+
+def display_grouped_by_hostname_and_drive(inventory):
+    """Displays files grouped by hostname and drive."""
+    grouped_data = group_files_by_hostname_and_drive(inventory)
+
+    lines = [highlight_fg + "Files grouped by hostname and drive:" + Style.RESET_ALL]
+    for hostname, drives in grouped_data.items():
+        lines.append(header_fg + f"Hostname: {hostname}" + Style.RESET_ALL)
+        for drive, stats in drives.items():
+            lines.append(text_fg + f"  Drive: {drive} - {stats['count']} file(s), {human_readable_size(stats['size'])}" + Style.RESET_ALL)
+
+    paginate_output(lines)
+
+def scan_remote_share(remote_path):
+    """Scans a remote network share for files."""
+    if not os.path.exists(remote_path):
+        print(text_fg + f"The remote path {remote_path} is not accessible." + Style.RESET_ALL)
+        return
+
+    hostname = os.uname().nodename if hasattr(os, 'uname') else "Unknown Host"
+    print_header(f"Scanning remote share: {remote_path}")
+    existing_inventory = load_existing_inventory(output_file)
+    new_inventory, total_size = traverse_and_extract(remote_path, hostname)
+    updated_inventory = merge_inventories(existing_inventory, new_inventory)
+
+    with open(output_file, "w") as f:
+        json.dump(updated_inventory, f, indent=4)
+
+    print(text_fg + f"✔ Metadata extracted and saved to: {output_file}" + Style.RESET_ALL)
+    print(text_fg + f"✔ Total data size: {human_readable_size(total_size)}" + Style.RESET_ALL)
+    update_last_scan()
+
+def has_inventory_changed(output_file, last_modified_time):
+    """Checks if the inventory file has been modified since the last check."""
+    try:
+        current_modified_time = os.path.getmtime(output_file)
+        return current_modified_time > last_modified_time, current_modified_time
+    except FileNotFoundError:
+        return False, last_modified_time
+
+def get_local_hostname():
+    """Gets the local hostname."""
+    try:
+        return socket.gethostname()
+    except Exception as e:
+        return f"Unknown Host ({e})"
+
+def get_network_hostname():
+    """Attempts to determine the network hostname."""
+    try:
+        return socket.getfqdn()
+    except Exception:
+        return get_local_hostname()
+
+# Update the start_scan function to capture both local and network hostnames
+def start_scan(folder):
+    """Starts the scanning process for a given folder."""
+    print_header(f"Scanning: {folder}")
+    local_hostname = get_local_hostname()
+    network_hostname = get_network_hostname()
+    hostname = f"{local_hostname} ({network_hostname})"
+
+    existing_inventory = load_existing_inventory(output_file)
+    new_inventory, total_size = traverse_and_extract(folder, hostname)
+    updated_inventory = merge_inventories(existing_inventory, new_inventory)
+
+    with open(output_file, "w") as f:
+        json.dump(updated_inventory, f, indent=4)
+
+    print(text_fg + f"✔ Metadata extracted and saved to: {output_file}" + Style.RESET_ALL)
+    print(text_fg + f"✔ Total data size: {human_readable_size(total_size)}" + Style.RESET_ALL)
+    update_last_scan()
+
+# Update the remove_drive_from_inventory function to allow host-level removal
+def remove_drive_or_host_from_inventory():
+    """Removes a drive or an entire host's entries from the inventory."""
+    global existing_inventory
+
+    # Display available hosts and drives in the inventory
+    hosts = set(item["hostname"] for item in existing_inventory if "hostname" in item)
+    drives = set(os.path.splitdrive(item["full_path"])[0] for item in existing_inventory if os.name == 'nt')
+
+    print(header_fg + "Available Hosts:" + Style.RESET_ALL)
+    hosts_list = list(hosts)
+    for i, host in enumerate(hosts_list, start=1):
+        print(text_fg + f"  {i}. {host}" + Style.RESET_ALL)
+
+    print(header_fg + "Available Drives:" + Style.RESET_ALL)
+    drives_list = list(drives)
+    for i, drive in enumerate(drives_list, start=1):
+        print(text_fg + f"  {i + len(hosts_list)}. {drive}" + Style.RESET_ALL)
+
+    # Prompt user to select a host or drive to remove
+    choice = input(highlight_fg + "Enter the number of the host or drive to remove: " + Style.RESET_ALL).strip()
+    if choice.isdigit():
+        choice = int(choice)
+        if 1 <= choice <= len(hosts_list):
+            selected_host = hosts_list[choice - 1]
+            existing_inventory = [item for item in existing_inventory if item["hostname"] != selected_host]
+            print(text_fg + f"✔ Host {selected_host} and its files have been removed from the inventory." + Style.RESET_ALL)
+        elif len(hosts_list) < choice <= len(hosts_list) + len(drives_list):
+            selected_drive = drives_list[choice - len(hosts_list) - 1]
+            existing_inventory = [item for item in existing_inventory if not item["full_path"].startswith(selected_drive)]
+            print(text_fg + f"✔ Drive {selected_drive} and its files have been removed from the inventory." + Style.RESET_ALL)
+        else:
+            print(text_fg + "Invalid selection. Please try again." + Style.RESET_ALL)
+    else:
+        print(text_fg + "Invalid input. Please enter a number." + Style.RESET_ALL)
+
+    # Save updated inventory
+    with open(output_file, "w") as f:
+        json.dump(existing_inventory, f, indent=4)
+
+def display_main_menu():
+    """Displays the main menu with breadcrumb navigation and inventory status."""
+    global existing_inventory
+    last_modified_time = os.path.getmtime(output_file) if os.path.exists(output_file) else 0
+
+    while True:
+        inventory_changed, last_modified_time = has_inventory_changed(output_file, last_modified_time)
+        if inventory_changed:
+            existing_inventory = load_existing_inventory(output_file)
+
+        # Calculate inventory stats
+        total_files = len(existing_inventory)
+        total_size = sum(item["file_size_bytes"] for item in existing_inventory)
+        unique_drives = set(os.path.splitdrive(item["full_path"])[0] for item in existing_inventory if os.name == 'nt')
+        unique_hostnames = set(item["hostname"] for item in existing_inventory if "hostname" in item)
+
+        # Format inventory status
+        inventory_status = (
+            f"Inventory: {'Empty' if total_files == 0 else f'{total_files} files, {human_readable_size(total_size)}'}\n"
+            f"Drives: {len(unique_drives)}\n"
+            f"Hostnames: {len(unique_hostnames)}\n"
+        )
+
+        # Get last scan info
+        scan_file = "last_scan.json"
+        last_scan = "No scan data available."
+        try:
+            if os.path.exists(scan_file):
+                with open(scan_file, "r") as f:
+                    last_scan = json.load(f).get("last_scan", last_scan)
+                    relative_time = format_relative_time(last_scan)
+                    last_scan = f"Last scan: {relative_time}"
+        except Exception as e:
+            last_scan = f"Error reading scan data: {e}"
+
+        # Display header with inventory status
+        print_header("Main Menu")
+        print(text_fg + inventory_status + Style.RESET_ALL)
+        print(highlight_fg + last_scan + Style.RESET_ALL)
+
+        # Display menu options
+        print(header_fg + "┌───────────────────────────────┐")
+        print(text_fg + "│ 1. Scan for new files         │")
+        print(text_fg + "│ 2. View inventory             │")
+        print(text_fg + "│ 3. Manage inventory           │")
+        print(text_fg + "│ x. Exit                       │")
+        print(header_fg + "└───────────────────────────────┘" + Style.RESET_ALL)
+
+        choice = input(highlight_fg + "Enter your choice: " + Style.RESET_ALL).strip().lower()
+
+        if choice == "1":
+            scan_menu()
+        elif choice == "2":
+            inventory_menu()
+        elif choice == "3":
+            inventory_management_menu()
+        elif choice == "x":
+            clear_screen()
+            print(highlight_fg + "Thanks for using the app!" + Style.RESET_ALL)
+            break
+        else:
+            print(text_fg + "Invalid choice. Please try again." + Style.RESET_ALL)
+
+def scan_menu():
+    """Displays the scan menu with inventory information and drive/host discovery."""
+    global existing_inventory
+    last_modified_time = os.path.getmtime(output_file) if os.path.exists(output_file) else 0
+
+    while True:
+        inventory_changed, last_modified_time = has_inventory_changed(output_file, last_modified_time)
+        if inventory_changed:
+            existing_inventory = load_existing_inventory(output_file)
+
+        # Calculate inventory stats
+        total_files = len(existing_inventory)
+        total_size = sum(item["file_size_bytes"] for item in existing_inventory)
+        unique_drives = set(os.path.splitdrive(item["full_path"])[0] for item in existing_inventory if os.name == 'nt')
+        unique_hostnames = set(item["hostname"] for item in existing_inventory if "hostname" in item)
+
+        # Format inventory status
+        inventory_status = (
+            f"Inventory: {'Empty' if total_files == 0 else f'{total_files} files, {human_readable_size(total_size)}'}\n"
+            f"Drives: {len(unique_drives)}\n"
+            f"Hostnames: {len(unique_hostnames)}\n"
+        )
+
+        print_header("Main Menu > Scan Menu")
+        print(text_fg + inventory_status + Style.RESET_ALL)
+
+        print(header_fg + "┌───────────────────────────────┐")
+        print(text_fg + "│ 1. Scan default folder        │")
+        print(text_fg + "│ 2. Scan custom folder         │")
+        print(text_fg + "│ 3. Discover drives/hosts      │")
+        print(text_fg + "│ x. Back to Main Menu          │")
+        print(header_fg + "└───────────────────────────────┘" + Style.RESET_ALL)
+
+        choice = input(highlight_fg + "Enter your choice: " + Style.RESET_ALL).strip().lower()
+
+        if choice == "1":
+            default_folder = Path.home() / "OneDrive" / "Documents"
+            start_scan(str(default_folder))
+        elif choice == "2":
+            custom_folder = input(highlight_fg + "Enter the folder path to scan: " + Style.RESET_ALL).strip()
+            if os.path.isdir(custom_folder):
+                start_scan(custom_folder)
+            else:
+                print(text_fg + "Invalid folder path. Please try again." + Style.RESET_ALL)
+        elif choice == "3":
+            discover_targets_menu()
+        elif choice == "x":
+            break
+        else:
+            print(text_fg + "Invalid choice. Please try again." + Style.RESET_ALL)
+
+def discover_targets_menu():
+    """Displays a menu for discovering drives and network hosts."""
+    while True:
+        print_header("Main Menu > Scan Menu > Discover Targets")
+
+        # Discover drives
+        drives = discover_drives()
+        print(header_fg + "Available Drives:" + Style.RESET_ALL)
+        for i, drive in enumerate(drives, start=1):
+            print(text_fg + f"  {i}. {drive}" + Style.RESET_ALL)
+
+        # Placeholder for network hosts discovery (can be expanded later)
+        print(header_fg + "Available Network Hosts:" + Style.RESET_ALL)
+        print(text_fg + "  (Feature not yet implemented)" + Style.RESET_ALL)
+
+        print(header_fg + "┌───────────────────────────────┐")
+        print(text_fg + "│ Enter a number to scan target │")
+        print(text_fg + "│ x. Back to Scan Menu          │")
+        print(header_fg + "└───────────────────────────────┘" + Style.RESET_ALL)
+
+        choice = input(highlight_fg + "Enter your choice: " + Style.RESET_ALL).strip().lower()
+
+        if choice.isdigit() and 1 <= int(choice) <= len(drives):
+            selected_drive = drives[int(choice) - 1]
+            start_scan(selected_drive)
+        elif choice == "x":
+            break
+        else:
+            print(text_fg + "Invalid choice. Please try again." + Style.RESET_ALL)
+
+def inventory_menu():
+    """Displays the inventory menu with breadcrumb navigation."""
+    global existing_inventory
+    last_modified_time = os.path.getmtime(output_file) if os.path.exists(output_file) else 0
+
+    while True:
+        inventory_changed, last_modified_time = has_inventory_changed(output_file, last_modified_time)
+        if inventory_changed:
+            existing_inventory = load_existing_inventory(output_file)
+
+        print_header("Main Menu > Inventory Menu")
         print(header_fg + "┌───────────────────────────────┐")
         print(text_fg + "│ 1. Summary statistics         │")
         print(text_fg + "│ 2. Search files by name       │")
         print(text_fg + "│ 3. Filter files by extension  │")
         print(text_fg + "│ 4. Display largest files      │")
         print(text_fg + "│ 5. Group files by directory   │")
-        print(text_fg + "│ x. Exit                       │")
+        print(text_fg + "│ 6. Group files by hostname and drive │")
+        print(text_fg + "│ x. Back to Main Menu          │")
         print(header_fg + "└───────────────────────────────┘" + Style.RESET_ALL)
+
         choice = input(highlight_fg + "Enter your choice: " + Style.RESET_ALL).strip().lower()
 
         if choice == "1":
-            print_header("Summary Statistics", inventory)
-            display_summary_statistics(inventory)
+            display_summary_statistics(existing_inventory)
         elif choice == "2":
-            print_header("Search Files by Name", inventory)
             search_term = input(highlight_fg + "Enter the file name or partial name to search: " + Style.RESET_ALL).strip()
-            search_files_by_name(inventory, search_term)
+            search_files_by_name(existing_inventory, search_term)
         elif choice == "3":
-            print_header("Filter Files by Extension", inventory)
             extension = input(highlight_fg + "Enter the file extension to filter by (e.g., .txt): " + Style.RESET_ALL).strip()
-            filter_files_by_extension(inventory, extension)
+            filter_files_by_extension(existing_inventory, extension)
         elif choice == "4":
-            print_header("Largest Files", inventory)
             top_n = int(input(highlight_fg + "Enter the number of largest files to display: " + Style.RESET_ALL).strip())
-            display_largest_files(inventory, top_n)
+            display_largest_files(existing_inventory, top_n)
         elif choice == "5":
-            print_header("Group Files by Directory", inventory)
-            group_files_by_directory(inventory)
+            group_files_by_directory(existing_inventory)
+        elif choice == "6":
+            display_grouped_by_hostname_and_drive(existing_inventory)
         elif choice == "x":
-            print_header("File Inventory Dashboard", inventory)
             break
         else:
             print(text_fg + "Invalid choice. Please try again." + Style.RESET_ALL)
 
-        print_footer_with_scan()
+def inventory_management_menu():
+    """Displays the inventory management menu with breadcrumb navigation."""
+    global existing_inventory
+    last_modified_time = os.path.getmtime(output_file) if os.path.exists(output_file) else 0
 
-def display_dashboard(inventory):
-    """Displays a dashboard summary of the inventory."""
-    os.system('cls' if os.name == 'nt' else 'clear')
-    print(header_bg + header_fg + "=" * 50)
-    print(text_fg + "File Inventory Dashboard".center(50) + Style.RESET_ALL)
-    print(header_bg + header_fg + "=" * 50 + Style.RESET_ALL)
-
-    if not inventory:
-        print(text_fg + "No data available in the inventory." + Style.RESET_ALL)
-        return
-
-    # Calculate size by drive
-    size_by_drive = {}
-    for item in inventory:
-        drive = os.path.splitdrive(item["full_path"])[0]
-        size_by_drive[drive] = size_by_drive.get(drive, 0) + item["file_size_bytes"]
-
-    # Find the most recent file
-    most_recent_file = max(inventory, key=lambda x: x["last_modified_timestamp"], default=None)
-
-    # Display size by drive
-    print(highlight_fg + "Size by drive:")
-    for drive, size in size_by_drive.items():
-        print(text_fg + f"  {drive}: {human_readable_size(size)}" + Style.RESET_ALL)
-
-    if most_recent_file:
-        print(highlight_fg + "Most recent file:")
-        print(text_fg + f"  {most_recent_file['file_name']} ({human_readable_size(most_recent_file['file_size_bytes'])})")
-        print(text_fg + f"  Last modified: {most_recent_file['last_modified_iso']}")
-        print(text_fg + f"  Path: {most_recent_file['full_path']}" + Style.RESET_ALL)
-
-    # Display the most recent scan timestamp
-    scan_file = "last_scan.json"
-    try:
-        if os.path.exists(scan_file):
-            with open(scan_file, "r") as f:
-                last_scan = json.load(f).get("last_scan")
-                relative_time = format_relative_time(last_scan)
-                print(highlight_fg + f"Most recent scan: {relative_time}" + Style.RESET_ALL)
-        else:
-            print(text_fg + "Most recent scan: No scan data available." + Style.RESET_ALL)
-    except Exception as e:
-        print(text_fg + f"Error reading scan data: {e}" + Style.RESET_ALL)
-
-    print(header_bg + header_fg + "=" * 50 + Style.RESET_ALL)
-
-def update_last_scan():
-    """Updates the timestamp of the most recent scan."""
-    scan_file = "last_scan.json"
-    try:
-        with open(scan_file, "w") as f:
-            json.dump({"last_scan": datetime.datetime.now().isoformat()}, f)
-    except Exception as e:
-        print(text_fg + f"Error updating scan data: {e}" + Style.RESET_ALL)
-
-def scan_menu(output_file):
-    """Menu for scanning files and updating the inventory."""
     while True:
-        # Reload inventory at the start of the menu
-        existing_inventory = load_existing_inventory(output_file)
-
-        default_source_folder = Path.home() / "OneDrive" / "Documents"  # Dynamically determine the default path
-        available_paths = [str(default_source_folder)] + discover_drives()  # Add default and discovered drives
-
-        print_header("Scan Menu")
-        print(highlight_fg + "Available paths:")
-        for i, path in enumerate(available_paths, start=1):
-            print(text_fg + f"  {i}. {path}")
-        print(text_fg + f"  {len(available_paths) + 1}. Enter a custom path")
-        print(text_fg + f"  x. Exit" + Style.RESET_ALL)
-
-        choice = input(highlight_fg + "Enter your choice: " + Style.RESET_ALL).strip().lower()
-
-        if choice.isdigit():
-            choice = int(choice)
-            if 1 <= choice <= len(available_paths):
-                source_folder = available_paths[choice - 1]
-            elif choice == len(available_paths) + 1:
-                source_folder = input(highlight_fg + "Enter the full path to the folder you want to scan: " + Style.RESET_ALL).strip()
-                if not os.path.isdir(source_folder):
-                    print(text_fg + f"Error: The path '{source_folder}' is not valid. Please try again." + Style.RESET_ALL)
-                    continue
-            else:
-                print(text_fg + "Invalid choice. Please try again." + Style.RESET_ALL)
-                continue
-
-            # Start scanning the selected folder
-            print_header("Scanning Folder", None)
-            print(highlight_fg + f"Starting metadata extraction from: {source_folder}" + Style.RESET_ALL)
+        inventory_changed, last_modified_time = has_inventory_changed(output_file, last_modified_time)
+        if inventory_changed:
             existing_inventory = load_existing_inventory(output_file)
-            new_inventory, total_size = traverse_and_extract(source_folder)
-            updated_inventory = merge_inventories(existing_inventory, new_inventory)
 
-            with open(output_file, "w") as f:
-                json.dump(updated_inventory, f, indent=4)
-
-            print(text_fg + f"✔ Metadata extracted and saved to: {output_file}" + Style.RESET_ALL)
-            print(text_fg + f"✔ Total data size: {human_readable_size(total_size)}" + Style.RESET_ALL)
-
-            # Reload the inventory after the scan
-            reloaded_inventory = load_existing_inventory(output_file)
-            print(text_fg + "✔ Inventory reloaded successfully after the scan." + Style.RESET_ALL)
-
-            # Update the last scan timestamp
-            update_last_scan()
-        elif choice == "x":
-            print_header("File Inventory Dashboard", load_existing_inventory(output_file))
-            break
-        else:
-            print(text_fg + "Invalid choice. Please try again." + Style.RESET_ALL)
-
-        print_footer_with_scan()
-
-def inventory_management_menu(inventory, output_file):
-    """Menu for managing the inventory, such as removing a drive and its files."""
-    while True:
-        # Reload inventory at the start of the menu
-        inventory[:] = load_existing_inventory(output_file)
-
-        print_header("Inventory Management Menu", inventory)
-        print(header_fg + "\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510")
-        print(text_fg + "\u2502 1. Remove a drive and its files from inventory \u2502")
-        print(text_fg + "\u2502 2. Reload inventory file                 \u2502")
-        print(text_fg + "\u2502 x. Exit                                \u2502")
-        print(header_fg + "\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518" + Style.RESET_ALL)
-
-        # Display discovered drives
-        drives = sorted(set(item["full_path"].split("\\")[0] + "\\" for item in inventory))
-        print(highlight_fg + "Discovered drives in inventory:" + Style.RESET_ALL)
-        for drive in drives:
-            print(text_fg + f"  {drive}" + Style.RESET_ALL)
+        print_header("Main Menu > Inventory Management Menu")
+        print(header_fg + "┌───────────────────────────────┐")
+        print(text_fg + "│ 1. Remove a drive or host     │")
+        print(text_fg + "│ 2. Reload inventory           │")
+        print(text_fg + "│ x. Back to Main Menu          │")
+        print(header_fg + "└───────────────────────────────┘" + Style.RESET_ALL)
 
         choice = input(highlight_fg + "Enter your choice: " + Style.RESET_ALL).strip().lower()
 
         if choice == "1":
-            print(highlight_fg + "Available drives in inventory:" + Style.RESET_ALL)
-            for i, drive in enumerate(drives, start=1):
-                print(text_fg + f"  {i}. {drive}" + Style.RESET_ALL)
-
-            drive_choice = input(highlight_fg + "Enter the number of the drive to remove: " + Style.RESET_ALL).strip()
-
-            if drive_choice.isdigit() and 1 <= int(drive_choice) <= len(drives):
-                drive_to_remove = drives[int(drive_choice) - 1]
-
-                updated_inventory = [item for item in inventory if not item["full_path"].startswith(drive_to_remove)]
-
-                with open(output_file, "w") as f:
-                    json.dump(updated_inventory, f, indent=4)
-
-                print(text_fg + f"\u2714 Drive {drive_to_remove} and its files have been removed from the inventory." + Style.RESET_ALL)
-                inventory[:] = updated_inventory  # Update the in-memory inventory
-            else:
-                print(text_fg + "Invalid choice. Please try again." + Style.RESET_ALL)
-
+            remove_drive_or_host_from_inventory()
         elif choice == "2":
-            # Reload the inventory file
-            reloaded_inventory = load_existing_inventory(output_file)
-            inventory[:] = reloaded_inventory  # Update the in-memory inventory
-            print(text_fg + "\u2714 Inventory file reloaded successfully." + Style.RESET_ALL)
-
+            reload_inventory()
         elif choice == "x":
             break
         else:
             print(text_fg + "Invalid choice. Please try again." + Style.RESET_ALL)
+
+def reload_inventory():
+    """Reloads the inventory from the JSON file."""
+    global existing_inventory
+
+    try:
+        existing_inventory = load_existing_inventory(output_file)
+        print(text_fg + "✔ Inventory successfully reloaded." + Style.RESET_ALL)
+    except Exception as e:
+        print(text_fg + f"Error reloading inventory: {e}" + Style.RESET_ALL)
 
 def clear_screen():
     """Clears the terminal screen."""
@@ -501,37 +699,6 @@ if __name__ == "__main__":
     # Load existing inventory
     existing_inventory = load_existing_inventory(output_file)
 
-    while True:
-        # Display dashboard
-        display_dashboard(existing_inventory)
-
-        print("\nMain Menu:")
-        print("1. Scan for new files and update inventory")
-        print("2. Display existing inventory")
-        print("3. Inventory management")  # New option
-        print("x. Exit")
-        main_choice = input("Enter your choice: ").strip().lower()
-
-        if main_choice == "1":
-            # Open the scan menu
-            scan_menu(output_file)
-
-        elif main_choice == "2":
-            # Display existing inventory
-            if existing_inventory:
-                display_inventory_menu(existing_inventory)
-            else:
-                print(text_fg + "No inventory data available." + Style.RESET_ALL)
-
-        elif main_choice == "3":
-            # Open the inventory management menu
-            inventory_management_menu(existing_inventory, output_file)
-
-        elif main_choice == "x":
-            clear_screen()
-            print(highlight_fg + "Thanks for using my silly app! -arrfour" + Style.RESET_ALL)
-            break
-
-        else:
-            print(text_fg + "Invalid choice. Please try again." + Style.RESET_ALL)
+    # Display main menu
+    display_main_menu()
 
