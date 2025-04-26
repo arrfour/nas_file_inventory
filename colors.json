@@ -1,6 +1,6 @@
 {
-    "header_bg": "WHITE",
-    "header_fg": "BLUE",
-    "text_fg": "RED",
+    "header_bg": "BLUE",
+    "header_fg": "WHITE",
+    "text_fg": "BLUE",
     "highlight_fg": "CYAN"
 }
