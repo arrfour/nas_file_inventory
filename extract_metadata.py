@@ -177,6 +177,28 @@ def print_header(title, inventory=None):
         print(text_fg + f"Total size: {human_readable_size(total_size)}" + Style.RESET_ALL)
         print(header_bg + header_fg + "=" * 50 + Style.RESET_ALL)
 
+def format_relative_time(last_scan_iso):
+    """Formats the last scan timestamp into a human-readable, relative time."""
+    try:
+        last_scan_time = datetime.datetime.fromisoformat(last_scan_iso)
+        now = datetime.datetime.now()
+        delta = now - last_scan_time
+
+        if delta.total_seconds() < 60:
+            return "just now"
+        elif delta.total_seconds() < 3600:
+            minutes = int(delta.total_seconds() // 60)
+            return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+        elif delta.total_seconds() < 86400:
+            hours = int(delta.total_seconds() // 3600)
+            return f"{hours} hour{'s' if hours > 1 else ''} ago"
+        else:
+            days = int(delta.total_seconds() // 86400)
+            return f"{days} day{'s' if days > 1 else ''} ago"
+    except Exception as e:
+        return "unknown time"
+
+# Update the print_footer_with_scan function to use the new relative time formatter
 def print_footer_with_scan():
     """Prints a footer with the last scan timestamp and a custom message."""
     scan_file = "last_scan.json"
@@ -185,12 +207,13 @@ def print_footer_with_scan():
         if os.path.exists(scan_file):
             with open(scan_file, "r") as f:
                 last_scan = json.load(f).get("last_scan", last_scan)
-                last_scan = datetime.datetime.fromisoformat(last_scan).strftime("%Y-%m-%d %H:%M:%S")
+                relative_time = format_relative_time(last_scan)
+                last_scan = f"Last scan: {relative_time}"
     except Exception as e:
         last_scan = f"Error reading scan data: {e}"
 
     print(header_bg + header_fg + "\n" + "=" * 50)
-    print(highlight_fg + f"Last scan: {last_scan}".center(50))
+    print(highlight_fg + f"{last_scan}".center(50))
     print(text_fg + "Hope you like my work!".center(50) + Style.RESET_ALL)
     print(header_bg + header_fg + "=" * 50 + Style.RESET_ALL)
 
@@ -337,7 +360,8 @@ def display_dashboard(inventory):
         if os.path.exists(scan_file):
             with open(scan_file, "r") as f:
                 last_scan = json.load(f).get("last_scan")
-                print(highlight_fg + f"Most recent scan: {last_scan}" + Style.RESET_ALL)
+                relative_time = format_relative_time(last_scan)
+                print(highlight_fg + f"Most recent scan: {relative_time}" + Style.RESET_ALL)
         else:
             print(text_fg + "Most recent scan: No scan data available." + Style.RESET_ALL)
     except Exception as e:

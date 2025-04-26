@@ -1,5 +1,9 @@
 # File Inventory Application
 
+## Recent Updates
+- **Version 0.2**:
+  - Added a feature to display the "most recent scan" in a human-readable, relative format (e.g., "5 minutes ago", "2 days ago").
+
 ## Version
 This is version 0.1 of the File Inventory Application.
 
