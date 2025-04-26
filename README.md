@@ -86,3 +86,4 @@ This project is licensed under the MIT License. Feel free to use and modify it a
 ---
 
 *Hope you enjoy using the File Inventory Application!*
+*"Ever wondered where all your disk space went? Meet the File Inventory Application – your friendly neighborhood file detective! It scans, sorts, and spills the beans on your files, all while looking sharp with customizable colors. Think of it as Marie Kondo for your hard drive – if Marie Kondo loved JSON and progress bars. 🎉"*
