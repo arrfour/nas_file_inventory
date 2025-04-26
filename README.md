@@ -3,6 +3,8 @@
 ## Recent Updates
 
 - **NFIv2N Branch development based on V0.2**
+   - Broken Summary Statistics function 
+   - various bugs, work in progress
 
 - **Version 0.2**:
   - Added a feature to display the "most recent scan" in a human-readable, relative format (e.g., "5 minutes ago", "2 days ago").
