@@ -2,6 +2,13 @@
 
 ## Recent Updates
 
+- **NFIv2N Branch development based on V0.2**
+  - Fixed Summary Statistics function to display accurate and detailed information, including total inventory size, total hosts, and most recent scan details.
+  - Resolved issues with scanning and saving data to `file_inventory.json` and `last_scan.json`.
+  - Enhanced hostname detection for both local and network resources during scans.
+  - Added functionality to ensure necessary JSON files are created if missing when the app starts.
+  - Improved debug logging for better traceability during scans and inventory updates.
+
 - **Version 0.2**:
   - Added a feature to display the "most recent scan" in a human-readable, relative format (e.g., "5 minutes ago", "2 days ago").
 
@@ -17,6 +24,8 @@ The **File Inventory Application** is a Python-based tool designed to scan direc
 - **Interactive Menus**: Allows users to navigate through options like summary statistics, file searches, and grouping by directory.
 - **Dynamic Dashboard**: Displays total files, total size, size by drive, most recent file, and last scan timestamp.
 - **Dynamic Theming**: Supports customizable color palettes via a JSON configuration file for a flexible and user-defined UI.
+- **Robust Scanning**: Handles both local and network resources, dynamically detecting hostnames and ensuring accurate metadata extraction.
+- **Persistent Data Management**: Automatically creates and manages `file_inventory.json` and `last_scan.json` files for seamless operation.
 
 ## Features
 
@@ -49,7 +58,7 @@ The **File Inventory Application** is a Python-based tool designed to scan direc
 1. Run the application:
 
    ```bash
-   python extract_metadata.py
+   python main.py
    ```
 
 2. Follow the interactive menus to:
@@ -84,3 +93,4 @@ This project is licensed under the MIT License. Feel free to use and modify it a
 ---
 
 *Hope you enjoy using the File Inventory Application!*
+*"Ever wondered where all your disk space went? Meet the File Inventory Application – your friendly neighborhood file detective! It scans, sorts, and spills the beans on your files, all while looking sharp with customizable colors. Think of it as Marie Kondo for your hard drive – if Marie Kondo loved JSON and progress bars. 🎉"*
