@@ -2,5 +2,5 @@
     "header_bg": "BLUE",
     "header_fg": "WHITE",
     "text_fg": "BLUE",
-    "highlight_fg": "CYAN"
+    "highlight_fg": "green"
 }
