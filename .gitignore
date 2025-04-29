@@ -1,3 +1,4 @@
 file_inventory.json
 last_scan.json
 *.bak
+__pycache__/
