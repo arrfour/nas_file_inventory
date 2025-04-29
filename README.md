@@ -8,6 +8,8 @@
   - Enhanced hostname detection for both local and network resources during scans.
   - Added functionality to ensure necessary JSON files are created if missing when the app starts.
   - Improved debug logging for better traceability during scans and inventory updates.
+  - **New Feature**: Added support for scanning specific file types by extension, improving scan efficiency for targeted use cases.
+  - **New Feature**: Implemented error handling for inaccessible directories, ensuring the application continues scanning without interruption.
 
 - **Version 0.2**:
   - Added a feature to display the "most recent scan" in a human-readable, relative format (e.g., "5 minutes ago", "2 days ago").
@@ -26,6 +28,8 @@ The **File Inventory Application** is a Python-based tool designed to scan direc
 - **Dynamic Theming**: Supports customizable color palettes via a JSON configuration file for a flexible and user-defined UI.
 - **Robust Scanning**: Handles both local and network resources, dynamically detecting hostnames and ensuring accurate metadata extraction.
 - **Persistent Data Management**: Automatically creates and manages `file_inventory.json` and `last_scan.json` files for seamless operation.
+- **Targeted Scanning**: Allows users to specify file types by extension for more efficient scans.
+- **Resilient Operation**: Skips inaccessible directories and logs errors without halting the scan process.
 
 ## Features
 
@@ -34,6 +38,7 @@ The **File Inventory Application** is a Python-based tool designed to scan direc
 - **Persistent Data**: Saves inventory data to a JSON file for future use.
 - **Last Scan Tracking**: Records and displays the timestamp of the most recent scan.
 - **Customizable Colors**: Modify the UI theme by editing the `colors.json` file.
+- **Error Handling**: Logs errors for inaccessible directories while continuing the scan.
 
 ## Requirements
 
