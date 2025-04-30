@@ -1,4 +1,5 @@
 file_inventory.json
 last_scan.json
+folder_structure.md
 *.bak
 __pycache__/
